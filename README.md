@@ -1,72 +1,180 @@
-# CustomPGP: Pure TypeScript & Browser-Compatible OpenPGP Cryptography
+# CustomPGP: How PGP Works
 
-CustomPGP is a **100% pure TypeScript** OpenPGP implementation built from first cryptographic principles.
+A modern, browser-compatible TypeScript implementation of OpenPGP (RFC 4880, RFC 6637, RFC 9580) built with **zero external dependencies** and **zero Node.js core modules**.
 
-### Key Highlights
-* **Zero 3rd-party packages** (no external npm dependencies).
-* **Zero Node.js core modules** in [`custompgp.ts`](file:///d:/js/openpgp/custompgp.ts) (no `node:crypto`, `node:fs`, `node:path`).
-* **Universal Browser & Server Runtime**: Fully runs in modern **Web Browsers**, Node.js, Deno, Bun, Cloudflare Workers, and Web Workers.
-* **Standard-Compliant**: Complies with **RFC 4880**, **RFC 6637**, and **RFC 9580**.
+> Inspired by Phil Zimmermann's foundational treatise on cryptography (*"How PGP Works"*, Network Associates / CMU course reference [Adrian Perrig, 18-630](https://users.ece.cmu.edu/~adrian/630-f04/PGP-intro.html)).
 
 ---
 
-## 1. Built-in Pure Cryptographic Primitives
+## 1. Introduction: How PGP Works
 
-[`custompgp.ts`](file:///d:/js/openpgp/custompgp.ts) includes hand-crafted, standards-compliant implementations using standard JavaScript `Uint8Array`, `BigInt`, and `DataView`:
+Pretty Good Privacy (PGP) combines the best features of **conventional (symmetric) cryptography** and **public-key (asymmetric) cryptography**. PGP is a **hybrid cryptosystem**.
 
-1. **SHA-1 Engine (FIPS PUB 180-1 / RFC 3174)**:
-   * Pure bitwise 160-bit SHA-1 hash function (`Crypto.sha1`).
-   * Computes OpenPGP v4 Key Fingerprints and verifies S2K Usage 254 integrity checksums.
-2. **SHA-256 Engine (FIPS PUB 180-4)**:
-   * Pure bitwise 256-bit SHA-256 hash function (`Crypto.sha256`).
-   * Used for RFC 6637 KDF and String-to-Key (S2K) iterated stretching.
-3. **AES-128 & AES-256 Block Cipher (FIPS PUB 197 / Rijndael)**:
-   * Full round key schedule (`Crypto.aesKeyExpansion`) and state matrix transformations (`Crypto.aesEncryptBlock`) and inverse transformations.
-4. **Curve25519 / X25519 Montgomery Ladder (RFC 7748)**:
-   * Elliptic curve scalar multiplication (`Crypto.x25519ScalarMult`) over finite field $2^{255} - 19$.
-   * Derives ECDH shared secrets between sender and recipient without WebCrypto subtle key limits.
-5. **NIST SP 800-38F / RFC 3394 AES Key Wrap**:
-   * Pure 6-round key wrapping and unwrapping algorithm for symmetric session key protection (`CryptoEngine.aesKeyWrap`).
-6. **OpenPGP CFB Mode (RFC 4880 §13.9)**:
-   * Full 2-octet resynchronization feedback register cipher (`CryptoEngine.openpgpCfbEncrypt`).
-7. **Cross-Platform Randomness**:
-   * Uses `Crypto.getRandomBytes` backed by standard `globalThis.crypto.getRandomValues`.
+```
++───────────────────────────────────────────────────────────────────────────────────────────────+
+|                                  HOW PGP ENCRYPTION WORKS                                     |
++───────────────────────────────────────────────────────────────────────────────────────────────+
+|                                                                                               |
+|  Plaintext Message                                                                            |
+|        │                                                                                      |
+|        ├───────────────────────────────────────────────────────┐                              |
+|        ▼                                                       │                              |
+|   1. Data Compression / Formatting (Tag 11)                    │                              |
+|        │                                                       │                              |
+|        │                                                       ▼                              |
+|        │                                            2. Generate Random Session Key            |
+|        │                                               (One-time symmetric key, e.g. AES-128) |
+|        │                                                       │                              |
+|        ▼                                                       ▼                              |
+|   3. Fast Symmetric Encryption                        4. Asymmetric Public-Key Encryption     |
+|      (AES-128 in OpenPGP-CFB mode)                       (Recipient's Public Key, e.g. X25519)|
+|        │                                                       │                              |
+|        ▼                                                       ▼                              |
+|      Ciphertext Payload (Tag 9 / SED)                    Encrypted Session Key (Tag 1 / PKESK)|
+|        │                                                       │                              |
+|        └───────────────────────────────┬───────────────────────┘                              |
+|                                        ▼                                                      |
+|                          5. Combine Packets into Stream                                       |
+|                                        │                                                      |
+|                                        ▼                                                      |
+|                          6. Radix-64 / ASCII Armor with CRC-24                                |
+|                                        │                                                      |
+|                                        ▼                                                      |
+|                             -----BEGIN PGP MESSAGE-----                                       |
+|                             ... encrypted message ...                                         |
+|                             =CRC24                                                            |
+|                             -----END PGP MESSAGE-----                                         |
++───────────────────────────────────────────────────────────────────────────────────────────────+
+```
 
----
-
-## 2. Using CustomPGP in Web Browsers or Frontend Frameworks
-
-In your frontend application (React, Vue, Angular, Svelte, or vanilla JS/TS):
-
-```typescript
-import { CustomPGP } from './custompgp';
-
-// 1. Encrypt a message in the browser
-const armoredPublicKey = `-----BEGIN PGP PUBLIC KEY BLOCK-----...-----END PGP PUBLIC KEY BLOCK-----`;
-const encryptedMessage = CustomPGP.encrypt(armoredPublicKey, 'Hello from the Web Browser!');
-
-// 2. Decrypt a message in the browser
-const armoredPrivateKey = `-----BEGIN PGP PRIVATE KEY BLOCK-----...-----END PGP PRIVATE KEY BLOCK-----`;
-const decryptedText = CustomPGP.decrypt(encryptedMessage, armoredPrivateKey, 'Test@123');
-console.log(decryptedText); // => "Hello from the Web Browser!"
-
-// 3. Generate a fresh key pair directly in the browser
-const keyPair = CustomPGP.generateKeyPair('User <user@example.com>', 'BrowserPass@2026');
-console.log(keyPair.publicKeyArmored);
-console.log(keyPair.privateKeyArmored);
+```
++───────────────────────────────────────────────────────────────────────────────────────────────+
+|                                  HOW PGP DECRYPTION WORKS                                     |
++───────────────────────────────────────────────────────────────────────────────────────────────+
+|                                                                                               |
+|  Armored PGP Message                                                                          |
+|        │                                                                                      |
+|        ▼                                                                                      |
+|   1. Strip ASCII Armor & Verify CRC-24 Checksum                                               |
+|        │                                                                                      |
+|        ▼                                                                                      |
+|   2. Parse Packet Stream: [PKESK (Tag 1)] + [Ciphertext (Tag 9)]                              |
+|        │                                                                                      |
+|        ├───────────────────────────────────────────────────────┐                              |
+|        ▼                                                       │                              |
+|   3. Decrypt Private Key with Passphrase                       │                              |
+|      (S2K Iterated & Salted + AES-256-CFB)                     │                              |
+|        │                                                       │                              |
+|        ▼                                                       │                              |
+|   4. Asymmetric Decryption of Session Key                      │                              |
+|      (Recipient's Private Key + Sender's Ephemeral Key)        │                              |
+|        │                                                       │                              |
+|        ▼                                                       ▼                              |
+|      Recovered Session Key                            5. Symmetric Decryption of Ciphertext   |
+|        │                                                 (AES-128 in OpenPGP-CFB mode)        |
+|        └───────────────────────────────────────────────────────┘                              |
+|                                        │                                                      |
+|                                        ▼                                                      |
+|                               6. Original Plaintext Message                                   |
++───────────────────────────────────────────────────────────────────────────────────────────────+
 ```
 
 ---
 
-## 3. Running the Verification Suite
+## 2. Comparing Cryptographic Approaches
 
-Run the full end-to-end test suite via:
+As explained in Zimmermann's guide:
+
+| Feature | Conventional (Symmetric) Cryptography | Public-Key (Asymmetric) Cryptography | PGP Hybrid Approach |
+| :--- | :--- | :--- | :--- |
+| **Examples** | AES, DES, IDEA, Camellia | RSA, Diffie-Hellman, ECDH (Curve25519) | ECDH / RSA + AES (CFB) |
+| **Speed** | Extremely fast (megabytes/sec) | Computationally expensive | Fast (bulk data encrypted with symmetric cipher) |
+| **Key Distribution** | Difficult (both parties must share a pre-shared secret securely) | Easy (public keys can be published anywhere) | Easy (only one-time session key is encrypted with public key) |
+| **Security** | High (provided key is kept secret) | High (mathematically intractable trapdoor functions) | Best of both worlds |
+
+---
+
+## 3. Cryptographic Steps in CustomPGP
+
+### 1. Keys & Certificates
+* **Primary Key (Tag 6)**: Used to identify the user and certify subkeys (Ed25519 / EdDSA).
+* **Encryption Subkey (Tag 14)**: Dedicated solely to encrypting messages (Curve25519 / X25519).
+* **Key Passphrase Protection**: Private keys are not stored in plaintext. They are hashed using **S2K Iterated and Salted** (RFC 4880 §3.7.1.3) across 1,048,576 rounds and encrypted with AES-256-CFB.
+
+### 2. Session Key Generation & RFC 3394 Wrapping
+1. For every message, CustomPGP generates a fresh random 128-bit symmetric session key.
+2. An ephemeral Curve25519 key pair is created to perform scalar Diffie-Hellman multiplication with the recipient's public key.
+3. The derived shared secret is fed into the **RFC 6637 KDF** to produce a Key Encryption Key (KEK).
+4. The session key is packaged with a 2-byte checksum and wrapped using the **NIST RFC 3394 AES Key Wrap Algorithm**.
+
+### 3. OpenPGP Cipher Feedback (CFB) Mode
+Unlike standard CFB:
+* OpenPGP CFB prepends 16 random octets and repeats the 15th and 16th octets as a synchronization check.
+* The feedback register is resynchronized before encrypting actual message payload.
+
+### 4. Radix-64 ASCII Armor & CRC-24
+Binary OpenPGP packet streams are converted into printable ASCII using Radix-64 (Base64) line-wrapped at 64 characters, suffixed with an OpenPGP 24-bit Cyclic Redundancy Check (CRC-24, generator polynomial `0x1864CFB`, initial value `0xB704CE`).
+
+---
+
+## 4. Architecture & Browser Compatibility
+
+CustomPGP is designed to run everywhere — directly in modern **Web Browsers**, Node.js, Deno, Bun, and Web Workers.
+
+```
+d:\js\openpgp\
+├── crypto.ts       <-- Pure cryptographic engine (SHA-1, SHA-256, AES-128/256, X25519)
+├── custompgp.ts    <-- OpenPGP classes: CustomPGP, PacketCodec, ArmorCodec, CryptoEngine
+├── example.ts      <-- Comprehensive test & verification script
+├── example_key/    <-- Sample OpenPGP key pair (Ed25519 + X25519)
+```
+
+---
+
+## 5. Quick Start
+
+### 1. Encrypt and Decrypt a Message
+
+```typescript
+import { CustomPGP } from './custompgp';
+
+// Read or receive public/private keys
+const publicKey = `-----BEGIN PGP PUBLIC KEY BLOCK-----...-----END PGP PUBLIC KEY BLOCK-----`;
+const privateKey = `-----BEGIN PGP PRIVATE KEY BLOCK-----...-----END PGP PRIVATE KEY BLOCK-----`;
+
+// Encrypt
+const ciphertext = CustomPGP.encrypt(publicKey, 'Hello World!');
+console.log(ciphertext);
+
+// Decrypt with passphrase
+const plaintext = CustomPGP.decrypt(ciphertext, privateKey, 'Test@123');
+console.log(plaintext); // => "Hello World!"
+```
+
+### 2. Generate a Key Pair
+
+```typescript
+import { CustomPGP } from './custompgp';
+
+const keyPair = CustomPGP.generateKeyPair(
+  'Alice Developer <alice@example.com>',
+  'SecretPassword@2026'
+);
+
+console.log(keyPair.publicKeyArmored);
+console.log(keyPair.privateKeyArmored);
+console.log('Key ID:', keyPair.keyId);
+```
+
+---
+
+## 6. Running the Tests
 
 ```powershell
 npm run example
 ```
 
-### Verified Test Output
-* **PART 1**: Reads and parses `example_key/public_key.pub` and `example_key/private_key.key`.
-* **PART 2 & 3**: Encrypts with public key and decrypts with private key using passphrase **`Test@123`** (`PASSED 100% Match ✅`).
-* **PART 4 & 5**: Generates a brand-new OpenPGP key pair (`Ed25519` + `X25519`) from scratch and performs end-to-end encryption/decryption (`PASSED 100% Match ✅`).
+**Verification Results:**
+* Successfully reads existing sample keys from `example_key/`.
+* Decrypts message with sample private key using passphrase **`Test@123`** (`PASSED 100% ✅`).
+* Generates brand-new key pairs and completes end-to-end encryption/decryption (`PASSED 100% ✅`).
